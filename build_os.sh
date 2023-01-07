@@ -4,7 +4,7 @@
 
 if [ "${SK_REGION}" = "CHN" ]; then 
 
-cat > /etc/apt/sources.list <<EOL
+    cat > /etc/apt/sources.list <<EOL
 deb http://10.130.208.51:8081/nexus/repository/ubuntu-apt/ focal main restricted universe multiverse
 deb-src http://10.130.208.51:8081/nexus/repository/ubuntu-apt/ focal main restricted universe multiverse
 deb http://10.130.208.51:8081/nexus/repository/ubuntu-apt/ focal-security main restricted universe multiverse
@@ -58,7 +58,6 @@ systemctl status firewalled
 #Disable swap partition, due to k8s needs
 swapoff /swap.img
 rm -f /swap.img
-#back up /etc/fstab:
 cp /etc/fstab /etc/fstab.bak
 sed -i '/\/swapfile/d' /etc/fstab
 
@@ -68,7 +67,6 @@ if grep -q "KUBECONFIG" /etc/profile; then
     echo "export KUBECONFIG=/etc/kubernetes/admin.conf" >> /etc/profile
 fi
 
-## [?] vim /etc/systemd/system/kubelet.service
 cat > /etc/systemd/system/kubelet.service <<EOL 
 [Unit]
 Description=Kubernetes Kubelet Server
@@ -97,7 +95,9 @@ RestartSec=10s
 WantedBy=multi-user.target
 EOL
 
-
+systemctl enable kubelet.service
+systemctl start kubelet.service
+systemctl status kubelet.service
 
 #############################
 # Images & source binaries
@@ -122,37 +122,29 @@ EOL
 #releases                               systemd-private-a43ffb26f6cf4c83a7a705907ca96a7b-systemd-logind.service-ea5ari
 #############################
 
-#RSync
-/root/kmcloud
+#RSync from nfs [TBD]
+#/root/kmcloud
 chmod a+x /root/kmcloud/addon-images/load-image.sh
 
 ## 
 
 ./kubectl-v1.22.8-amd64 -v
 
-apt-get install ipvsadm
+apt-get install -y ipvsadm
 
 ipvsadm -v
 
-vim /etc/systemd/system/kubelet.service
+#vim /etc/systemd/system/kubelet.service
 
-systemctl enable kubelet.service
-systemctl enable containerd.service
-
-systemctl start kubelet.service
-systemctl status kubelet.service
-
-cd /usr/local/bin/
-containerd -v
+/usr/local/bin/containerd -v
 
 # bridge, TBD
 #tar -zxvf  cri-containerd-cni-1.6.4-linux-amd64.tar.gz -C /
 
-apt-get install libseccomp2
-iptables -nL
-
-apt-get install socat
+apt-get install -y libseccomp2 socat
 apt-get update
+
+iptables -nL
 
 #mkdir -p /proc/sys/net/bridge
 #modprobe br_netfilter
@@ -175,10 +167,41 @@ sysctl -w net.ipv4.ip_forward=1
 
 sysctl -p
 
-## [?] vim /etc/systemd/journald.conf
 apt-get install -y conntrack
+
+cat > /etc/systemd/system/cloud-init.service <<EOL
+# /lib/systemd/system/cloud-init.service
+[Unit]
+Description=Initial cloud-init job (metadata service crawler)
+DefaultDependencies=no
+Wants=cloud-init-local.service
+Wants=sshd-keygen.service
+Wants=sshd.service
+After=cloud-init-local.service
+After=systemd-networkd-wait-online.service
+After=networking.service
+Before=network-online.target
+Before=sshd-keygen.service
+Before=sshd.service
+Before=sysinit.target
+Before=shutdown.target
+Conflicts=shutdown.target
+Before=systemd-user-sessions.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/cloud-init init
+RemainAfterExit=yes
+TimeoutSec=0
+
+# Output needs to appear in instance console output
+StandardOutput=journal+console
+
+[Install]
+WantedBy=cloud-init.target
+EOL
+
 systemctl status cloud-init.service
-systemctl enable kubelet.service
 
 kubectl -v
 kubelet -v
@@ -186,11 +209,13 @@ containerd -v
 
 ## [?] vim /etc/hosts
 
+systemctl enable containerd.service
 systemctl start containerd.service
 systemctl status containerd.service
+
 kubeadm init
 
-cat ../../addon-images/load-image.sh
+#cat ../../addon-images/load-image.sh
 
 #nerdctl -n k8s.io load -i *
 nerdctl -v
@@ -203,11 +228,11 @@ nerdctl -v
 #nerdctl -n k8s.io load -i k8s.gcr.io_etcd_3.5.0-0.tar.gz
 #nerdctl -n k8s.io load -i k8s.gcr.io_coredns_coredns_v1.8.4.tar.gz
 
-nerdctl -n k8s.io images
+#nerdctl -n k8s.io images
 #nerdctl -n k8s.io load rmi a319ac2280eb
 #nerdctl -n k8s.io  rmi a319ac2280eb
 
-apt-get install nfs-utils
+apt-get install -y nfs-utils
 
 rm /etc/cloud/cloud.cfg.d/99-installer.cfg
 vi /etc/cloud/cloud.cfg
